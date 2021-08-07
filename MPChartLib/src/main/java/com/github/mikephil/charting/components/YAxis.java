@@ -2,6 +2,10 @@ package com.github.mikephil.charting.components;
 
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Typeface;
+
+import androidx.annotation.ColorInt;
+import androidx.annotation.Px;
 
 import com.github.mikephil.charting.utils.Utils;
 
@@ -74,6 +78,11 @@ public class YAxis extends AxisBase {
     private YAxisLabelPosition mPosition = YAxisLabelPosition.OUTSIDE_CHART;
 
     /**
+     * the horizontal offset of the y-label
+     */
+    private float mXLabelOffset = 0.0f;
+
+    /**
      * enum for the position of the y-labels relative to the chart
      */
     public enum YAxisLabelPosition {
@@ -84,6 +93,8 @@ public class YAxis extends AxisBase {
      * the side this axis object represents
      */
     private AxisDependency mAxisDependency;
+
+    private AxisLabel axisLabel;
 
     /**
      * the minimum width that the axis should take (in dp).
@@ -114,12 +125,14 @@ public class YAxis extends AxisBase {
         // default left
         this.mAxisDependency = AxisDependency.LEFT;
         this.mYOffset = 0f;
+        this.axisLabel = new AxisLabel();
     }
 
     public YAxis(AxisDependency position) {
         super();
         this.mAxisDependency = position;
         this.mYOffset = 0f;
+        this.axisLabel = new AxisLabel();
     }
 
     public AxisDependency getAxisDependency() {
@@ -172,6 +185,22 @@ public class YAxis extends AxisBase {
      */
     public void setPosition(YAxisLabelPosition pos) {
         mPosition = pos;
+    }
+
+    /**
+     * returns the horizontal offset of the y-label
+     */
+    public float getLabelXOffset() {
+        return mXLabelOffset;
+    }
+
+    /**
+     * sets the horizontal offset of the y-label
+     *
+     * @param xOffset
+     */
+    public void setLabelXOffset(float xOffset) {
+        mXLabelOffset = xOffset;
     }
 
     /**
@@ -367,11 +396,72 @@ public class YAxis extends AxisBase {
             return false;
     }
 
+    public void setAxisLabel(AxisLabel axisLabel) {
+        this.axisLabel = axisLabel;
+    }
+
+    public AxisLabel getAxisLabel() {
+        return axisLabel;
+    }
+
+    public void setAxisLabelEnabled(boolean enabled) {
+        if (axisLabel != null) {
+            axisLabel.setEnabled(enabled);
+        }
+    }
+
+    public void setAxisLabelLocation(Location location) {
+        if (axisLabel != null) {
+            axisLabel.setLocation(location);
+        }
+    }
+
+    public void setAxisLabelName(String name) {
+        if (axisLabel != null) {
+            axisLabel.setName(name);
+        }
+    }
+
+    public void setAxisLabelSize(@Px float size) {
+        if (axisLabel != null) {
+            if (size > 24f)
+                size = 24f;
+            if (size < 6f)
+                size = 6f;
+
+            axisLabel.setSize(Utils.convertDpToPixel(size));
+        }
+    }
+
+    public void setAxisLabelColor(@ColorInt int color) {
+        if (axisLabel != null) {
+            axisLabel.setColor(color);
+        }
+    }
+
+    public void setAxisLabelTypeface(Typeface typeface) {
+        if (axisLabel != null) {
+            axisLabel.setTypeface(typeface);
+        }
+    }
+
+    public void setAxisLabelAlign(Align align) {
+        if (axisLabel != null) {
+            axisLabel.setAlign(align);
+        }
+    }
+
+    public void setAxisLabelVerticalAlign(VerticalAlign verticalAlign) {
+        if (axisLabel != null) {
+            axisLabel.setVerticalAlign(verticalAlign);
+        }
+    }
+
     /**
      * Returns true if autoscale restriction for axis min value is enabled
      */
     @Deprecated
-    public boolean isUseAutoScaleMinRestriction( ) {
+    public boolean isUseAutoScaleMinRestriction() {
         return mUseAutoScaleRestrictionMin;
     }
 
@@ -379,7 +469,7 @@ public class YAxis extends AxisBase {
      * Sets autoscale restriction for axis min value as enabled/disabled
      */
     @Deprecated
-    public void setUseAutoScaleMinRestriction( boolean isEnabled ) {
+    public void setUseAutoScaleMinRestriction(boolean isEnabled) {
         mUseAutoScaleRestrictionMin = isEnabled;
     }
 
@@ -395,7 +485,7 @@ public class YAxis extends AxisBase {
      * Sets autoscale restriction for axis max value as enabled/disabled
      */
     @Deprecated
-    public void setUseAutoScaleMaxRestriction( boolean isEnabled ) {
+    public void setUseAutoScaleMaxRestriction(boolean isEnabled) {
         mUseAutoScaleRestrictionMax = isEnabled;
     }
 
@@ -405,6 +495,20 @@ public class YAxis extends AxisBase {
 
         float min = dataMin;
         float max = dataMax;
+
+        // Make sure max is greater than min
+        // Discussion: https://github.com/danielgindi/Charts/pull/3650#discussion_r221409991
+        if (min > max) {
+            if (mCustomAxisMax && mCustomAxisMin) {
+                float t = min;
+                min = max;
+                max = t;
+            } else if (mCustomAxisMax) {
+                min = max < 0f ? max * 1.5f : max * 0.5f;
+            } else if (mCustomAxisMin) {
+                max = min < 0f ? min * 0.5f : min * 1.5f;
+            }
+        }
 
         float range = Math.abs(max - min);
 

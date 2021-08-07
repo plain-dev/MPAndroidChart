@@ -10,10 +10,22 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Paint.Style;
 import android.graphics.RectF;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.view.ViewGroup;
 
+import com.github.mikephil.charting.components.AxisLabel;
+import com.github.mikephil.charting.components.AxisLabelOption;
+import com.github.mikephil.charting.components.Location;
+import com.github.mikephil.charting.components.LocationCenter;
+import com.github.mikephil.charting.components.LocationEnd;
+import com.github.mikephil.charting.components.LocationStart;
+import com.github.mikephil.charting.components.VerticalAlign;
+import com.github.mikephil.charting.components.VerticalAlignBottom;
+import com.github.mikephil.charting.components.VerticalAlignCenter;
+import com.github.mikephil.charting.components.VerticalAlignTop;
 import com.github.mikephil.charting.components.XAxis.XAxisPosition;
 import com.github.mikephil.charting.components.YAxis;
 import com.github.mikephil.charting.components.YAxis.AxisDependency;
@@ -35,6 +47,7 @@ import com.github.mikephil.charting.utils.MPPointD;
 import com.github.mikephil.charting.utils.MPPointF;
 import com.github.mikephil.charting.utils.Transformer;
 import com.github.mikephil.charting.utils.Utils;
+import com.github.mikephil.charting.utils.ViewPortHandler;
 
 /**
  * Base-class of LineChart, BarChart, ScatterChart and CandleStickChart.
@@ -91,6 +104,8 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
 
     protected Paint mBorderPaint;
 
+    protected Paint mAxisLabelPaint;
+
     /**
      * flag indicating if the grid background should be drawn or not
      */
@@ -99,6 +114,8 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
     protected boolean mDrawBorders = false;
 
     protected boolean mClipValuesToContent = false;
+
+    protected boolean mClipDataToContent = true;
 
     /**
      * Sets the minimum offset (padding) around the chart, defaults to 15
@@ -177,6 +194,8 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
         mBorderPaint.setStyle(Style.STROKE);
         mBorderPaint.setColor(Color.BLACK);
         mBorderPaint.setStrokeWidth(Utils.convertDpToPixel(1f));
+
+        mAxisLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     }
 
     // for performance tracking
@@ -230,9 +249,12 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
         if (mAxisRight.isEnabled() && mAxisRight.isDrawLimitLinesBehindDataEnabled())
             mAxisRendererRight.renderLimitLines(canvas);
 
-        // make sure the data cannot be drawn outside the content-rect
         int clipRestoreCount = canvas.save();
-        canvas.clipRect(mViewPortHandler.getContentRect());
+
+        if (isClipDataToContentEnabled()) {
+            // make sure the data cannot be drawn outside the content-rect
+            canvas.clipRect(mViewPortHandler.getContentRect());
+        }
 
         mRenderer.drawData(canvas);
 
@@ -284,6 +306,9 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
 
         drawMarkers(canvas);
 
+        drawAxisLabel(canvas, getAxis(AxisDependency.LEFT));
+        drawAxisLabel(canvas, getAxis(AxisDependency.RIGHT));
+
         if (mLogEnabled) {
             long drawtime = (System.currentTimeMillis() - starttime);
             totalTime += drawtime;
@@ -292,6 +317,130 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
             Log.i(LOG_TAG, "Drawtime: " + drawtime + " ms, average: " + average + " ms, cycles: "
                     + drawCycles);
         }
+    }
+
+    private void drawAxisLabel(Canvas canvas, YAxis yAxis) {
+        if (yAxis != null && yAxis.isEnabled()) {
+            try {
+                ViewGroup parent = (ViewGroup) getParent();
+                parent.setClipChildren(false);
+                parent.setClipToPadding(false);
+            } catch (Exception e) {
+                // empty
+            }
+            AxisLabel axisLabel = yAxis.getAxisLabel();
+            MPPointF mpPointF = calculateAxisLabelLocation(axisLabel, yAxis.getAxisDependency());
+            drawAxisLabel(canvas, axisLabel.getName(), mpPointF);
+        }
+    }
+
+    private void drawAxisLabel(Canvas canvas, String name, MPPointF mpPointF) {
+        if (mpPointF != null && !TextUtils.isEmpty(name)) {
+            canvas.save();
+            float x = mpPointF.getX();
+            float y = mpPointF.getY();
+            float degrees = mpPointF.getDegrees();
+            if (degrees != 0) {
+                canvas.rotate(degrees, x, y);
+            }
+            canvas.drawText(name, x, y, mAxisLabelPaint);
+        }
+    }
+
+    private MPPointF calculateAxisLabelLocation(AxisLabel axisLabel, AxisDependency axisDependency) {
+        if (axisLabel != null && axisLabel.isEnabled() && axisDependency != null) {
+            Location location = axisLabel.getLocation();
+            // Reserved space
+            boolean recalculateOffset = false;
+            if (axisLabel.getLocation() == LocationEnd.INSTANCE) {
+                setExtraTopOffset(AxisLabelOption.DEFAULT_RESERVED_SPACE);
+                recalculateOffset = true;
+            } else if (location == LocationCenter.INSTANCE) {
+                if (AxisDependency.LEFT.equals(axisDependency)) {
+                    setExtraLeftOffset(AxisLabelOption.DEFAULT_RESERVED_SPACE);
+                    recalculateOffset = true;
+                } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                    setExtraRightOffset(AxisLabelOption.DEFAULT_RESERVED_SPACE);
+                    recalculateOffset = true;
+                }
+            }
+            if (recalculateOffset) calculateOffsets();
+
+            float textSize = axisLabel.getSize();
+            mAxisLabelPaint.setTextSize(textSize);
+            mAxisLabelPaint.setColor(axisLabel.getColor());
+            mAxisLabelPaint.setTypeface(axisLabel.getTypeface());
+            mAxisLabelPaint.setTextAlign(axisLabel.getAlign().getPaintAlign());
+
+            float tempX = 0f;
+            float tempY = 0f;
+            float tempDegrees = 0f;
+
+            ViewPortHandler viewPortHandler = getViewPortHandler();
+            float contentLeft = viewPortHandler.contentLeft();
+            float contentTop = viewPortHandler.contentTop();
+            float contentRight = viewPortHandler.contentRight();
+            float contentBottom = viewPortHandler.contentBottom();
+            float offsetBottom = viewPortHandler.offsetBottom();
+            float chartWidth = viewPortHandler.getChartWidth();
+            float chartHeight = viewPortHandler.getChartHeight();
+
+            float extraLeftOffset = getExtraLeftOffset();
+            float extraRightOffset = getExtraRightOffset();
+
+            VerticalAlign verticalAlign = axisLabel.getVerticalAlign();
+            if (LocationEnd.INSTANCE.equals(location)) {
+                if (AxisDependency.LEFT.equals(axisDependency)) {
+                    tempX = contentLeft;
+                } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                    tempX = contentRight;
+                }
+                if (VerticalAlignTop.INSTANCE.equals(verticalAlign)) {
+                    tempY = contentTop; // TODO - descYOffset
+                } else if (VerticalAlignCenter.INSTANCE.equals(verticalAlign)) {
+                    tempY = contentTop / 2; // TODO + descYOffset * 2
+                } else if (VerticalAlignBottom.INSTANCE.equals(verticalAlign)) {
+                    tempY = textSize;
+                }
+            } else if (LocationCenter.INSTANCE.equals(location)) {
+                tempDegrees = -90f;
+                if (VerticalAlignTop.INSTANCE.equals(verticalAlign)) {
+                    if (AxisDependency.LEFT.equals(axisDependency)) {
+                        tempX = textSize;
+                    } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                        tempX = chartWidth - textSize / 2;
+                    }
+                } else if (VerticalAlignCenter.INSTANCE.equals(verticalAlign)) {
+                    if (AxisDependency.LEFT.equals(axisDependency)) {
+                        tempX = extraLeftOffset;
+                    } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                        tempX = chartWidth - extraRightOffset / 2;
+                    }
+                } else if (VerticalAlignBottom.INSTANCE.equals(verticalAlign)) {
+                    if (AxisDependency.LEFT.equals(axisDependency)) {
+                        tempX = extraLeftOffset + textSize;
+                    } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                        tempX = chartWidth - extraRightOffset;
+                    }
+                }
+                tempY = contentBottom / 2 + textSize;
+            } else if (LocationStart.INSTANCE.equals(location)) {
+                if (AxisDependency.LEFT.equals(axisDependency)) {
+                    tempX = contentLeft;
+                } else if (AxisDependency.RIGHT.equals(axisDependency)) {
+                    tempX = contentRight;
+                }
+                if (VerticalAlignTop.INSTANCE.equals(verticalAlign)) {
+                    tempY = contentBottom + offsetBottom - textSize;
+                } else if (VerticalAlignCenter.INSTANCE.equals(verticalAlign)) {
+                    tempY = contentBottom + offsetBottom / 2;
+                } else if (VerticalAlignBottom.INSTANCE.equals(verticalAlign)) {
+                    tempY = contentBottom + textSize;
+                }
+            }
+            return MPPointF.getInstance(tempX, tempY, tempDegrees);
+        }
+        return null;
     }
 
     /**
@@ -394,66 +543,70 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
         offsets.top = 0.f;
         offsets.bottom = 0.f;
 
-        // setup offsets for legend
-        if (mLegend != null && mLegend.isEnabled() && !mLegend.isDrawInsideEnabled()) {
-            switch (mLegend.getOrientation()) {
-                case VERTICAL:
+        if (mLegend == null || !mLegend.isEnabled() || mLegend.isDrawInsideEnabled())
+            return;
 
-                    switch (mLegend.getHorizontalAlignment()) {
-                        case LEFT:
-                            offsets.left += Math.min(mLegend.mNeededWidth,
-                                    mViewPortHandler.getChartWidth() * mLegend.getMaxSizePercent())
-                                    + mLegend.getXOffset();
-                            break;
+        switch (mLegend.getOrientation()) {
+            case VERTICAL:
 
-                        case RIGHT:
-                            offsets.right += Math.min(mLegend.mNeededWidth,
-                                    mViewPortHandler.getChartWidth() * mLegend.getMaxSizePercent())
-                                    + mLegend.getXOffset();
-                            break;
+                switch (mLegend.getHorizontalAlignment()) {
+                    case LEFT:
+                        offsets.left += Math.min(mLegend.mNeededWidth,
+                                mViewPortHandler.getChartWidth() * mLegend.getMaxSizePercent())
+                                + mLegend.getXOffset();
+                        break;
 
-                        case CENTER:
+                    case RIGHT:
+                        offsets.right += Math.min(mLegend.mNeededWidth,
+                                mViewPortHandler.getChartWidth() * mLegend.getMaxSizePercent())
+                                + mLegend.getXOffset();
+                        break;
 
-                            switch (mLegend.getVerticalAlignment()) {
-                                case TOP:
-                                    offsets.top += Math.min(mLegend.mNeededHeight,
-                                            mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
-                                            + mLegend.getYOffset();
-                                    break;
+                    case CENTER:
 
-                                case BOTTOM:
-                                    offsets.bottom += Math.min(mLegend.mNeededHeight,
-                                            mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
-                                            + mLegend.getYOffset();
-                                    break;
+                        switch (mLegend.getVerticalAlignment()) {
+                            case TOP:
+                                offsets.top += Math.min(mLegend.mNeededHeight,
+                                        mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
+                                        + mLegend.getYOffset();
+                                break;
 
-                                default:
-                                    break;
-                            }
-                    }
+                            case BOTTOM:
+                                offsets.bottom += Math.min(mLegend.mNeededHeight,
+                                        mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
+                                        + mLegend.getYOffset();
+                                break;
 
-                    break;
+                            default:
+                                break;
+                        }
+                }
 
-                case HORIZONTAL:
+                break;
 
-                    switch (mLegend.getVerticalAlignment()) {
-                        case TOP:
-                            offsets.top += Math.min(mLegend.mNeededHeight,
-                                    mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
-                                    + mLegend.getYOffset();
-                            break;
+            case HORIZONTAL:
 
-                        case BOTTOM:
-                            offsets.bottom += Math.min(mLegend.mNeededHeight,
-                                    mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
-                                    + mLegend.getYOffset();
-                            break;
+                switch (mLegend.getVerticalAlignment()) {
+                    case TOP:
+                        offsets.top += Math.min(mLegend.mNeededHeight,
+                                mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
+                                + mLegend.getYOffset();
 
-                        default:
-                            break;
-                    }
-                    break;
-            }
+
+                        break;
+
+                    case BOTTOM:
+                        offsets.bottom += Math.min(mLegend.mNeededHeight,
+                                mViewPortHandler.getChartHeight() * mLegend.getMaxSizePercent())
+                                + mLegend.getYOffset();
+
+
+                        break;
+
+                    default:
+                        break;
+                }
+                break;
         }
     }
 
@@ -1225,6 +1378,17 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
     }
 
     /**
+     * When disabled, the data and/or highlights will not be clipped to contentRect. Disabling this option can
+     * be useful, when the data lies fully within the content rect, but is drawn in such a way (such as thick lines)
+     * that there is unwanted clipping.
+     *
+     * @param enabled
+     */
+    public void setClipDataToContent(boolean enabled) {
+        mClipDataToContent = enabled;
+    }
+
+    /**
      * When enabled, the values will be clipped to contentRect,
      * otherwise they can bleed outside the content rect.
      *
@@ -1232,6 +1396,17 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
      */
     public boolean isClipValuesToContentEnabled() {
         return mClipValuesToContent;
+    }
+
+    /**
+     * When disabled, the data and/or highlights will not be clipped to contentRect. Disabling this option can
+     * be useful, when the data lies fully within the content rect, but is drawn in such a way (such as thick lines)
+     * that there is unwanted clipping.
+     *
+     * @return
+     */
+    public boolean isClipDataToContentEnabled() {
+        return mClipDataToContent;
     }
 
     /**
