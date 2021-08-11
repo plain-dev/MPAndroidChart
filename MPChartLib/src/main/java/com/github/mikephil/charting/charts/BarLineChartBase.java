@@ -344,6 +344,7 @@ public abstract class BarLineChartBase<T extends BarLineScatterCandleBubbleData<
                 canvas.rotate(degrees, x, y);
             }
             canvas.drawText(name, x, y, mAxisLabelPaint);
+            canvas.restore();
         }
     }
 
